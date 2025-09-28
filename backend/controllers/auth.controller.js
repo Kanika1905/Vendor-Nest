@@ -1,5 +1,6 @@
-import Vendor from "../models/vendor.model.js";
+ import Vendor from "../models/vendor.model.js";
 import Wholesaler from "../models/wholesaler.model.js";
+import Admin from "../models/admin.model.js";
 import { generateOTP, sendSmsOTP } from "../utils/twilioSms.js";
 
 // -------------------- Vendor Login --------------------
@@ -125,5 +126,69 @@ export const verifyWholesalerOTP = async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ message: "OTP verification failed", error: error.message });
+  }
+};
+
+// -------------------- Admin Login --------------------
+export const loginAdmin = async (req, res) => {
+  const { phone } = req.body;
+
+  if (!phone) {
+    return res.status(400).json({ message: "Phone number is required" });
+  }
+
+  const otp = generateOTP();
+
+  try {
+    await Admin.findOneAndUpdate(
+      { phone },
+      { phone, otp, otpExpiry: new Date(Date.now() + 5 * 60 * 1000) }, // 5 mins expiry
+      { upsert: true, new: true }
+    );
+
+    await sendSmsOTP(phone, otp, "Admin");
+
+    res.json({ message: "OTP sent successfully to Admin" });
+  } catch (error) {
+    console.error("❌ Error in login admin:", error);
+    return res.status(500).json({
+      message: "Failed to send OTP",
+      error: error.message,
+    });
+  }
+};
+
+// -------------------- Admin Verify --------------------
+export const verifyAdminOTP = async (req, res) => {
+  const { phone, otp } = req.body;
+
+  if (!phone || !otp) {
+    return res.status(400).json({ message: "Phone and OTP are required" });
+  }
+
+  try {
+    const admin = await Admin.findOne({ phone });
+
+    if (!admin) return res.status(404).json({ message: "Admin not found" });
+
+    if (admin.otp !== otp || admin.otpExpiry < new Date()) {
+      return res.status(400).json({ message: "Invalid or expired OTP" });
+    }
+
+    // ✅ Clear OTP and mark as verified
+    admin.otp = null;
+    admin.otpExpiry = null;
+    admin.isVerified = true;
+    await admin.save();
+
+    res.json({
+      message: "Admin login successful",
+      adminId: admin._id,
+      isVerified: admin.isVerified,
+    });
+  } catch (error) {
+    res
+      .status(500)
+      .json({ message: "OTP verification failed", error: error.message });
   }
 };
